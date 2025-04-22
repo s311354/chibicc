@@ -609,8 +609,26 @@ static Token *subst(Token *tok, MacroArg *args) {
       Token *t = preprocess2(arg->tok);
       t->at_bol = tok->at_bol;
       t->has_space = tok->has_space;
-      for (; t->kind != TK_EOF; t = t->next)
+      for (; t->kind != TK_EOF; t = t->next) {
+        // Since expansion inside an argument is isolated from the rest of
+        // source file, a macro token may still available for future expansion
+        // because of rescanning step after substitution.
+        //
+	// To differentiate it with a macro token that's permanently disabled
+        // its expansion, we check the `disabled` struct member, and if it's
+        // false, the macro token is still available for future expansion and
+        // we need to clear its hide set.
+        //
+	// If we're not clear the hide set, the hide set of that macro token
+        // will be dirty and some expansion may incomplete because of
+        // false-positive when calling hideset_contains() in rescanning step.
+        //
+        // This false-positive happens a lot in real programs that abuse
+        // nested macros.
+	if (!t->disabled)
+          t->hideset = NULL;
         cur = cur->next = copy_token(t);
+      }
       tok = tok->next;
       continue;
     }
@@ -628,11 +646,19 @@ static Token *subst(Token *tok, MacroArg *args) {
 // If tok is a macro, expand it and return true.
 // Otherwise, do nothing and return false.
 static bool expand_macro(Token **rest, Token *tok) {
-  if (hideset_contains(tok->hideset, tok->loc, tok->len))
+  if (hideset_contains(tok->hideset, tok->loc, tok->len)) {
+    // [https://www.sigbus.info/n1570#6.10.3.4p2] This macro token is no longer
+    // available for future expansion, tok->disabled is for faster checking.
+    // A better implementation may want to use bit flag instead.
+    tok->disabled = true;
     return false;
+  }
 
   Macro *m = find_macro(tok);
   if (!m)
+    return false;
+
+  if (tok->disabled) 
     return false;
 
   // Built-in dynamic macro application such as __LINE__
@@ -672,13 +698,18 @@ static bool expand_macro(Token **rest, Token *tok) {
   Hideset *hs = hideset_intersection(macro_token->hideset, rparen->hideset);
   hs = hideset_union(hs, new_hideset(m->name));
 
-  Token *body = subst(m->body, args);
-  body = add_hideset(body, hs);
-  for (Token *t = body; t->kind != TK_EOF; t = t->next)
-    t->origin = macro_token;
-  *rest = append(body, tok->next);
-  (*rest)->at_bol = macro_token->at_bol;
-  (*rest)->has_space = macro_token->has_space;
+  // If the replacement list is not empty 
+  if (m->body->kind != TK_EOF) {
+    Token *body = subst(m->body, args);
+    body = add_hideset(body, hs);
+    for (Token *t = body; t->kind != TK_EOF; t = t->next)
+      t->origin = macro_token;
+    *rest = append(body, tok->next);
+    (*rest)->at_bol = macro_token->at_bol;
+    (*rest)->has_space = macro_token->has_space;
+  } else {
+    *rest = tok->next;
+  }
   return true;
 }
 
@@ -842,7 +873,7 @@ static Token *preprocess2(Token *tok) {
 
   while (tok->kind != TK_EOF) {
     // If it is a macro, expand it.
-    if (expand_macro(&tok, tok))
+    if (tok->kind == TK_IDENT &&  expand_macro(&tok, tok))
       continue;
 
     // Pass through if it is not a "#".

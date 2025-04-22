@@ -319,6 +319,11 @@ int main() {
 #define M14(x) M13(x. M12)
   ASSERT(0, strcmp(M14(bar), "bar. foo"));
 
+#define STR_(x) STR(x)
+#define M13 M14 + 1
+#define M14 M13 + 2
+  ASSERT(0, strcmp(STR_(M13), "M13 + 2 + 1"));
+
 #include "include3.h"
   ASSERT(3, foo);
 

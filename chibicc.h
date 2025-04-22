@@ -88,6 +88,7 @@ struct Token {
   bool at_bol;      // True if this token is at beginning of line
   bool has_space;   // True if this token follows a space character
   Hideset *hideset; // For macro expansion
+  bool disabled;    // Macro that's permanently disabled its expansion.
   Token *origin;    // If this is expanded from a macro, the original token
 };
 
