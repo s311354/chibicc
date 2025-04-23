@@ -324,6 +324,9 @@ int main() {
 #define M14 M13 + 2
   ASSERT(0, strcmp(STR_(M13), "M13 + 2 + 1"));
 
+#define EMPTY()
+  ASSERT(0, strcmp(STR_(M15 EMPTY()()() 1), "M15 ()() 1"));
+
 #include "include3.h"
   ASSERT(3, foo);
 
